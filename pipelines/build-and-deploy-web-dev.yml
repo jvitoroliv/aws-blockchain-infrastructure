@@ -1,0 +1,114 @@
+#########################################
+###### BUILD IMAGE AND PUSH TO ECR ######
+#########################################
+
+trigger:
+- development
+
+resources:
+- repo: self
+
+variables:
+- name: tag
+  value: 'latest'
+- name: imageRepository
+  value: 'web-application'
+- name: imageName
+  value: 'web-application'
+- name: containerRegistryAddr
+  value: '222222222222.dkr.ecr.us-east-2.amazonaws.com'
+- name: containerName
+  value: 'web-application'
+- name: kubernetesSvcConnection
+  value: 'EKS-CLUSTER-DEV'
+- name: namespaceEKS
+  value: 'exampleplatform'
+
+pool: default
+
+stages:
+- stage: Build_Publish
+  displayName: Build & Publish to ECR
+  jobs:
+    - job: build
+      displayName: Prepare environment variables
+      steps:
+      - task: Docker@2
+        inputs:
+          repository:  $(imageRepository)
+          command: 'build'
+          Dockerfile: '**/DockerfileDev'
+          tags: |
+            $(Build.BuildId)
+            latest
+
+      - upload: k8s
+        artifact: k8s
+
+      - task: ECRPushImage@1
+        inputs:
+          awsCredentials: 'ECR-REGISTRY-DEV'
+          regionName: 'us-east-2'
+          imageSource: 'imagename'
+          sourceImageName: $(imageName)
+          repositoryName: $(imageRepository)
+          pushTag: 'latest'
+
+      - task: ECRPushImage@1
+        inputs:
+          awsCredentials: 'ECR-REGISTRY-DEV'
+          regionName: 'us-east-2'
+          imageSource: 'imagename'
+          sourceImageName: $(imageName)
+          sourceImageTag: $(Build.BuildId)
+          repositoryName: $(imageRepository)
+          pushTag: $(Build.BuildId)-dev
+
+
+
+- stage: Deploy_Dev
+  displayName: Deploy to EKS DEV
+  dependsOn:
+    - Build_Publish
+  condition: succeeded()
+  jobs:
+    - deployment: Deploy
+      displayName: Deploy EKS DEV
+      pool: default
+      # GitHub Environment — enables deployment protection rules and secrets scoping
+      environment: $(kubernetesSvcConnection)
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+                - task: Bash@3
+                  displayName: update service manifest
+                  inputs:
+                    targetType: inline
+                    script: |
+                      sed -i "s|CONTAINER_REGISTRY|$(containerRegistryAddr)|g" $(Pipeline.Workspace)/k8s/dev/deployment.yml
+                      sed -i "s|IMAGE_REPOSITORY|$(imageName)|g" $(Pipeline.Workspace)/k8s/dev/deployment.yml
+
+                - task: KubernetesManifest@0
+                  displayName: Deploy deployment to EKS DEV
+                  inputs:
+                    action: 'deploy'
+                    kubernetesServiceConnection: $(kubernetesSvcConnection)
+                    namespace: $(namespaceEKS)
+                    manifests: '$(Pipeline.Workspace)/k8s/dev/deployment.yml'
+
+                - task: KubernetesManifest@0
+                  displayName: Deploy service to EKS DEV
+                  inputs:
+                    action: 'deploy'
+                    kubernetesServiceConnection: $(kubernetesSvcConnection)
+                    namespace: $(namespaceEKS)
+                    manifests: '$(Pipeline.Workspace)/k8s/dev/service.yml'
+                - task: KubernetesManifest@0
+                  inputs:
+                    action: 'scale'
+                    kubernetesServiceConnection: 'EKS-CLUSTER-DEV'
+                    namespace: 'exampleplatform'
+                    kind: 'deployment'
+                    name: 'web-application'
+                    replicas: '1'

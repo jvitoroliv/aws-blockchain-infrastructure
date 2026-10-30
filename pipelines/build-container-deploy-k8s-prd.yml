@@ -1,0 +1,66 @@
+# build-container-deploy-k8s-prd.yml
+# deployment automation
+# Maintained by: Platform Engineering
+
+# build-container-deploy-k8s-prd.yml — deployment automation
+
+
+trigger:
+- master
+
+resources:
+  - repo: self
+
+variables:
+  - name: tag
+    value: $(Build.BuildId)-prd
+  - name: imageRepository
+    value: "api-users"
+  - name: 'vmImageName'
+    value: 'ubuntu-latest'
+  - name: dockerfilePath
+    value: '**/Dockerfile'
+  - name: containerRegistryAddr
+    value: "333333333333.dkr.ecr.us-east-2.amazonaws.com"
+
+
+pool: default
+
+
+#######################################
+###### BUILD IMAGE AND PUSH TO ECR ####
+#######################################
+
+stages:
+  
+  - stage: Build_Publish
+    displayName: Build docker image and publish in ECR repository
+    jobs:
+      - job: Build_Publish
+        displayName: Build and Publish
+        steps:
+        
+          - task: Docker@2
+            inputs:
+              repository: $(imageRepository)
+              command: 'build'
+              Dockerfile: $(dockerfilePath)
+              addPipelineData: false
+              addBaseImageData: false
+              tags: |
+                $(tag)
+          - upload: manifests
+            artifact: manifests
+
+          - task: ECRPushImage@1
+            inputs:
+              awsCredentials: 'ECR-REGISTRY-PROD'
+              regionName: 'us-east-2'
+              imageSource: 'imagename'
+              sourceImageName: $(imageRepository)
+              sourceImageTag: $(tag)
+              repositoryName: $(imageRepository)
+              pushTag: '10859-prd'
+              autoCreateRepository: true
+              logRequest: true
+              logResponse: true

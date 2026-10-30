@@ -1,0 +1,62 @@
+# docker-compose.yml
+# local development environment
+
+# Use root/example as user/password credentials
+version: "3.1"
+
+services:
+    mongo:
+        image: mongo
+        container_name: mongo
+        restart: always
+        ports:
+            - 27017:27017
+        # GitHub Environment — enables deployment protection rules and secrets scoping
+        environment:
+            MONGO_INITDB_ROOT_USERNAME: root
+            MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+    azurite:
+        image: mcr.microsoft.com/azure-storage/azurite
+        container_name: azurite
+        restart: always
+        ports:
+            - 10000:10000
+    maildev:
+        image: djfarrelly/maildev
+        container_name: maildev
+        ports:
+            - "1080:80"
+            - "25:25"
+        # networks:
+        #     - traefik
+        # labels:
+        #     - "traefik.backend=maildev"
+        #     - "traefik.docker.network=plataforma_network"
+        #     - "traefik.maildev.frontend.rule=PathPrefixStrip: /maildev"
+        #     - "traefik.port=80"
+    # example-platform-orders-server:
+    #     container_name: example.platform.orders
+    #     build:
+    #         context: ./../../app-back-orders/example.platform.orders/
+    #         dockerfile: Dockerfile
+    #     restart: always
+    #     ports:
+    #         - 5002:80
+    #     environment:
+    #         MongoDB__Host: mongo
+    #         DOTNET_RUNNING_IN_CONTAINER: "true"
+    #     depends_on:
+    #         - mongo
+    # example-platform-users-server:
+    #     container_name: example.platform.users
+    #     build:
+    #         context: ./
+    #         dockerfile: Dockerfile
+    #     restart: always
+    #     ports:
+    #         - 5001:80
+    #     environment:
+    #         MongoDB__Host: mongo
+    #         DOTNET_RUNNING_IN_CONTAINER: "true"
+    #     depends_on:
+    #         - mongo

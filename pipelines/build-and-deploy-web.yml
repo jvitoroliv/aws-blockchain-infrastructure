@@ -1,0 +1,67 @@
+#########################################
+###### BUILD IMAGE AND PUSH TO ECR ######
+#########################################
+
+trigger: 
+- master
+
+resources: 
+- repo: self
+
+variables:
+- name: tag
+  value: 'latest'
+- name: imageRepository
+  value: 'web-application'
+- name: imageName
+  value: 'web-application'
+- name: containerRegistryAddr
+  value: '333333333333.dkr.ecr.us-east-2.amazonaws.com'
+- name: containerName
+  value: 'web-application'
+- name: kubernetesSvcConnection
+  value: 'EKS-CLUSTER-PROD'
+- name: namespaceEKS
+  value: 'exampleplatform'
+
+pool: default
+  #vmImage: ubuntu-latest
+
+stages:
+- stage: Build_Publish
+  displayName: Build & Publish to ECR
+  jobs: 
+    - job: build
+      displayName: Prepare environment variables
+      steps: 
+      # alterar
+      - task: Docker@2
+        inputs:
+          repository:  $(imageRepository)
+          command: 'build'
+          Dockerfile: '**/Dockerfile'
+          tags: |
+            $(Build.BuildId)
+            latest
+
+      - upload: k8s
+        artifact: k8s
+      
+      - task: ECRPushImage@1
+        inputs:
+          awsCredentials: 'ECR-REGISTRY-PROD'
+          regionName: 'us-east-2'
+          imageSource: 'imagename'
+          sourceImageName: $(imageName)
+          repositoryName: $(imageRepository)
+          pushTag: 'latest'
+      
+      - task: ECRPushImage@1
+        inputs:
+          awsCredentials: 'ECR-REGISTRY-PROD'
+          regionName: 'us-east-2'
+          imageSource: 'imagename'
+          sourceImageName: $(imageName)
+          sourceImageTag: $(Build.BuildId)
+          repositoryName: $(imageRepository)
+          pushTag: 'latest'

@@ -1,0 +1,29 @@
+FROM mcr.microsoft.com/dotnet/core/sdk:3.1 AS build
+# Explicit workdir avoids path ambiguity in COPY and RUN instructions.
+WORKDIR /server
+
+# Copy everything and build
+COPY . ./
+
+ENV DOTNET_SYSTEM_NET_HTTP_USESOCKETSHTTPHANDLER=0
+ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED true
+ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS "{\"endpointCredentials\": [{\"endpoint\":\"https://pkgs.dev.azure.com/Example-Organization/_packaging/Private.Packages/nuget/v3/index.json\", \"username\":\"pipeline\", \"password\":\"<NUGET_FEED_TOKEN>\"}]}"
+
+RUN wget -qO- https://raw.githubusercontent.com/Microsoft/artifacts-credprovider/master/helpers/installcredprovider.sh | bash
+
+RUN dotnet restore "./Example.Platform.Users.WebAPI/Example.Platform.Users.WebAPI.csproj" 
+RUN dotnet publish "./Example.Platform.Users.WebAPI/Example.Platform.Users.WebAPI.csproj" -c Release -o out
+
+FROM mcr.microsoft.com/dotnet/core/aspnet:3.1 AS runtime
+# Explicit workdir avoids path ambiguity in COPY and RUN instructions.
+WORKDIR ../server
+COPY --from=build /server/out ./
+ENTRYPOINT ["dotnet", "Example.Platform.Users.WebAPI.dll"]
+
+# fontconfig is required to properly work with fonts in Linux.
+RUN apt-get update \
+    && apt-get install -y --allow-unauthenticated \
+        libfontconfig1
+        
+RUN apt-get update && apt-get install -y libgdiplus && apt-get install -y libfontconfig1-dev
+

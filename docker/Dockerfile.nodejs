@@ -1,0 +1,33 @@
+# Base image pinned to specific version for reproducible builds.
+# Base image pinned to specific version for reproducible builds.
+FROM node:lts-alpine3.14
+
+RUN mkdir -p /srv/app && chown 1000:1000 -R /srv/app
+
+WORKDIR /srv/app
+
+COPY docker-entrypoint.sh /usr/local/bin
+
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+COPY ./.env.example ./
+
+COPY ./package.json ./
+
+COPY ./package-lock.json ./
+
+COPY ./ .
+
+RUN chown 1000:1000 -R /srv/app/
+
+USER node
+
+ENV PATH /srv/app/node_modules/.bin:$PATH
+
+RUN npm install
+
+RUN npm run build 
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+CMD ["npm", "run", "start"]

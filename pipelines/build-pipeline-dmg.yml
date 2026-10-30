@@ -1,0 +1,122 @@
+# Xcode
+# Build, test, and archive an Xcode workspace on macOS.
+# Add steps that install certificates, test, sign, and distribute an app, save build artifacts, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/xcode
+# 
+#            !!!!!  ATTENTION  !!!!! 
+#
+# we need three different certificates to build the app for mas format 
+#
+# 1. the fisrt one must be an 'Apple Distribution' certificate, used to 
+# sign the application code, it is installed using the AZDO Task 
+# because we need this task to create a temporary keychain, then it 
+# is downloaded again and its path on pipeline disk is passed to the
+# electron-builder tool. This happens because after installing the cert
+# on the keychain, the 'InstallAppleCertificate@2' task deletes the file
+# 
+# 2. The second cert file is the Apple DeveloperID Certificate, it is 
+# needed to sign some installers, like PKG and DMG.
+# 
+# 3. The third one is the Mac Installer Certificate and it is used to
+# sign the MAS (Mac App Store) format app. So, dont change this pipeline
+# before understanding well WHAT THE FUCKING HELL ARE YOU DOIN'!
+#
+# I hope i was clear! - The Manager. 
+########################################################################
+
+# trigger:
+#  batch: true
+#  branches:
+#    include:
+#      - master
+#      - release/*
+
+variables:
+  - group: MacBuildConfig
+
+pool:
+  vmImage: 'macos-latest'
+
+steps:
+- task: NodeTool@0
+  inputs:
+    versionSpec: '16.x'
+  displayName: "Install NodeJS Tools"
+
+- task: InstallAppleCertificate@2
+  displayName: 'Install Distribution Certificate'
+  inputs:
+    certSecureFile: 'distribution.p12'
+    keychain: 'temp'
+    certPwd: $(SigningCertificatePassword)
+
+- task: DownloadSecureFile@1
+  displayName: "Download App Developer ID Certificate"
+  name: devCert
+  inputs:
+    secureFile: 'developerloperID_latest.p12'
+
+- pwsh: security import $(devCert.secureFilePath) -P $(SigningCertificatePassword) -A -t cert -f pkcs12 -k $(Agent.TempDirectory)/ios_signing_temp.keychain
+  displayName: Install 3rd Party Developer certificate
+
+- task: DownloadSecureFile@1
+  displayName: "Download DeveloperID Certificate"
+  name: p12Cert
+  inputs:
+    secureFile: 'developerloperID_latest.p12'
+
+- task: DownloadSecureFile@1
+  name: provFile
+  displayName: "Download Provisioning Profile"
+  inputs:
+    secureFile: 'developerDistribution.provisionprofile'
+
+- task: DownloadSecureFile@1
+  name: apiFile
+  displayName: "Download Apple API Key File"
+  inputs:
+    secureFile: '$(AppleApiKey)'
+
+- script: yarn install
+  displayName: 'Install dependencies'
+
+- script: | 
+    echo "[ ! ] Creating ./private_keys/ directory"
+
+    mkdir -p $(Build.Repository.LocalPath)/private_keys
+
+    echo "[ ! ] Copying ApiKey to $(Build.Repository.LocalPath)/private_keys/"
+
+    cp $(apiFile.secureFilePath) $(Build.Repository.LocalPath)/private_keys/
+
+    echo "[ ! ] Checking the Existence of Private Key"
+
+    ls $(Build.Repository.LocalPath)/private_keys/$(AppleApiKey) || echo "Arquivo $(AppleApiKey) nao existe!"
+
+    sed -ie "s|OSX_TARGET|dmg|g" $(Build.Repository.LocalPath)/package.json
+
+    sed -ie "s|RUNTIME_PROVISIONING_PROFILE_MAC|$PROVISIONING_PROFILE|g" $(Build.Repository.LocalPath)/package.json
+
+    yarn build:mac
+  displayName: 'Build App for Mac OSX'
+  env:
+    CSC_LINK: $(p12Cert.secureFilePath)
+    CSC_KEY_PASSWORD: $(SigningCertificatePassword)
+    PROVISIONING_PROFILE: $(provFile.secureFilePath)
+    API_KEY: $(apiFile.secureFilePath)
+    API_KEY_ID: $(AppleApiKeyId)
+    API_KEY_ISSUER_ID: $(AppleApiKeyIssuerId)
+
+- task: CopyFiles@2
+  inputs:
+    Contents: 'dist/*.dmg'
+    TargetFolder: '$(build.artifactstagingdirectory)/'
+    CleanTargetFolder: true
+    OverWrite: true
+    flattenFolders: true
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'desktop-osx'
+    publishLocation: 'Container'

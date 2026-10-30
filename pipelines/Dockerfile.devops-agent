@@ -1,0 +1,39 @@
+# Base image pinned to specific version for reproducible builds.
+FROM ubuntu:20.04
+# Explicit workdir avoids path ambiguity in COPY and RUN instructions.
+WORKDIR /home
+RUN apt-get update && \
+  apt-get install -y sudo && \
+  useradd -rm -d /home/ubuntu -s /bin/bash -g root -G sudo -u 1001 ubuntu && \
+  passwd -d ubuntu && \
+  apt-get install -y wget git  && \
+  wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian10-x86_64-100.5.4.tgz  && \
+  tar -zxvf mongodb-database-tools-*-100.5.4.tgz  && \
+  cp -r * /usr/local/bin/  && \
+  wget https://downloads.mongodb.com/compass/mongodb-mongosh_1.5.4_amd64.deb  && \
+  apt --fix-broken install -y  && \
+  apt-get install -y libgssapi-krb5-2  && \
+  dpkg -i ./mongodb-mongosh_1.5.4_amd64.deb  && \
+  apt-get install -y gnupg  && \
+  wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | apt-key add - && \
+  apt-get install -y mongodb-mongosh telnet 
+USER ubuntu
+# Explicit workdir avoids path ambiguity in COPY and RUN instructions.
+WORKDIR /home/ubuntu
+RUN sudo mkdir exampleco-agent
+# Explicit workdir avoids path ambiguity in COPY and RUN instructions.
+WORKDIR /home/ubuntu/exampleco-agent
+RUN sudo wget https://vstsagentpackage.azureedge.net/agent/2.211.1/vsts-agent-linux-x64-2.211.1.tar.gz && \
+  sudo tar zxvf vsts-agent-linux-x64-2.211.1.tar.gz && \
+  sudo DEBIAN_FRONTEND=noninteractive TZ="America/Sao_Paulo" apt-get -y install tzdata && \
+  sudo ./bin/installdependencies.sh && \
+  ./config.sh --unattended \
+  --agent insert-data \
+  --url https://dev.azure.com/Example-Organization \
+  --auth PAT \
+  --token <AZURE_DEVOPS_PAT> \
+  --pool Agent-container-k8s \
+  --work _work \
+  --replace \
+  --acceptTeeEula
+ENTRYPOINT ./run.sh

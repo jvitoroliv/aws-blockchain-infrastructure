@@ -1,0 +1,137 @@
+# build-container-deploy-k8s-dev.yml
+# deployment automation
+
+trigger:
+- package/v*
+
+resources:
+  - repo: self
+
+variables:
+  - name: tag
+    value: $(Build.BuildId)-dev
+  - name: imageRepository
+    value: "api-users"
+  - name: 'vmImageName'
+    value: 'ubuntu-latest'
+  - name: dockerfilePath
+    value: '**/Dockerfile'
+  - name: containerRegistryAddr
+    value: "222222222222.dkr.ecr.us-east-2.amazonaws.com"
+
+pool: default
+
+#######################################
+###### BUILD IMAGE AND PUSH TO ECR ####
+#######################################
+
+stages:
+  - stage: Build_Publish
+    displayName: Build docker image and publish in ECR repository
+    jobs:
+      - job: Build_Publish
+        displayName: Build and Publish
+        workspace: 
+         clean: 
+            all
+        steps:
+          - task: Docker@2
+            inputs:
+              repository: $(imageRepository)
+              command: 'build'
+              Dockerfile: $(dockerfilePath)
+              addPipelineData: false
+              addBaseImageData: false
+              tags: |
+                $(tag)
+          - upload: manifests
+            artifact: manifests
+
+          - task: ECRPushImage@1
+            inputs:
+              awsCredentials: 'ECR-REGISTRY-DEV'
+              regionName: 'us-east-2'
+              imageSource: 'imagename'
+              sourceImageName: $(imageRepository)
+              sourceImageTag: $(tag)
+              repositoryName: $(imageRepository)
+              pushTag: $(tag)
+              autoCreateRepository: true
+              logRequest: true
+              logResponse: true       
+
+
+############################
+###### Deploy EKS DEV ######
+############################
+    
+  - stage: DEPLOY_DEV
+    displayName: Deploy Stage
+    dependsOn:
+      - Build_Publish
+    condition: succeeded()
+    jobs:
+      - deployment: Deploy
+        displayName: Deploy EKS Dev
+        workspace: 
+         clean: 
+            all
+        pool: default
+        # GitHub Environment — enables deployment protection rules and secrets scoping
+        environment: EKS-CLUSTER-DEV
+        variables:
+          - group: DEV
+          - name: containerName
+            value: apiusers
+          - name: namespace
+            value: cenm
+          - name: certificateARN
+            value: arn:aws:acm:us-east-2:222222222222:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+              - task: Bash@3
+                displayName: Update service manifest
+                inputs:
+                  targetType: 'inline'
+                  script: |
+                    sed -ie "s|CONTAINER_REGISTRY|$(containerRegistryAddr)|g"  $(Pipeline.Workspace)/manifests/service.yml
+                    sed -ie "s|IMAGE_REPOSITORY|$(imageRepository)|g" $(Pipeline.Workspace)/manifests/service.yml
+                    sed -ie "s|ARN_CERT_ENV|$(certificateARN)|g" $(Pipeline.Workspace)/manifests/service.yml
+
+                    echo "$ cat $(Pipeline.Workspace)/manifests/service.yml"
+                    cat $(Pipeline.Workspace)/manifests/service.yml
+                    
+              - task: Bash@3
+                displayName: Update deployment manifest
+                inputs:
+                  targetType: inline
+                  script: |
+                    sed -ie "s|CONTAINER_REGISTRY|$(containerRegistryAddr)|g" $(Pipeline.Workspace)/manifests/deployment.yml 
+                    sed -ie "s|CONTAINER_NAME|$(containerName)|g" $(Pipeline.Workspace)/manifests/deployment.yml
+                    sed -ie "s|IMAGE_REPOSITORY|$(imageRepository)|g" $(Pipeline.Workspace)/manifests/deployment.yml
+                    sed -ie "s|TAG|$(tag)|g" $(Pipeline.Workspace)/manifests/deployment.yml
+
+                    sed -ie "s|ENV_VAR_ASPNETCORE_ENVIRONMENT|$(envVarEnvironment)|g" $(Pipeline.Workspace)/manifests/deployment.yml
+                    sed -ie "s|ENV_VAR_REPLICAS|$(envVarReplicas)|g" $(Pipeline.Workspace)/manifests/deployment.yml
+
+                    echo "$ cat $(Pipeline.Workspace)/manifests/deployment.yml"
+                    cat $(Pipeline.Workspace)/manifests/deployment.yml
+              
+              - task: KubernetesManifest@0
+                displayName: Deploy deployment in EKS DEV
+                inputs:
+                  action: 'deploy'
+                  kubernetesServiceConnection: 'EKS-CLUSTER-DEV'
+                  namespace: $(namespace)
+                  manifests: '$(Pipeline.Workspace)/manifests/deployment.yml'
+
+              - task: KubernetesManifest@0
+                displayName: Deploy service in EKS DEV
+                inputs:
+                  action: 'deploy'
+                  kubernetesServiceConnection: 'EKS-CLUSTER-DEV'
+                  namespace: $(namespace)
+                  manifests: '$(Pipeline.Workspace)/manifests/service.yml'

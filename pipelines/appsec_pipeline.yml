@@ -1,0 +1,48 @@
+# appsec_pipeline.yml — appsec_pipeline configuration
+
+# appsec_pipeline.yml — appsec_pipeline configuration
+
+trigger:
+- master
+
+resources:
+  - repo: self
+
+variables:
+  solution: '**/*.sln'
+  buildConfiguration: 'Release'
+
+pool:
+  vmImage: 'windows-latest'
+  demands:
+    - msbuild
+    - visualstudio
+    - vstest
+
+stages:
+  - stage: SAST
+    displayName: SAST
+    jobs:
+      - job: SonarQubeScan
+        displayName: SonarQube Scan
+        steps:
+          - task: SonarQubePrepare@5
+            inputs:
+              SonarQube: 'APP-SONARQUBE'
+              scannerMode: 'MSBuild'
+              projectKey: 'example_api-service' 
+
+          - script: cd src && dotnet restore
+
+          - task: DotNetCoreCLI@2
+            displayName: Build
+            inputs:
+              command: build
+              projects: '$(solution)'
+              arguments: '--configuration $(buildConfiguration)'
+
+          - task: SonarQubeAnalyze@5
+
+          - task: SonarQubePublish@5
+            inputs:
+              pollingTimeoutSec: '300'
